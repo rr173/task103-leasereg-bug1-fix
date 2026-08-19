@@ -212,6 +212,15 @@ func (s *Store) Renew(ctx context.Context, resource, holder string, fencingToken
 	if existing.FencingToken != fencingToken {
 		return 0, 0, ErrTokenMismatch
 	}
+	// Enforce a registered resource's max_ttl, if any. A max_ttl of 0 means
+	// "unbounded" (the default for unregistered resources). The check runs
+	// before the UPDATE so the surrounding transaction rolls back and the
+	// original lease row is left untouched when the renewal is rejected.
+	if maxTTL, ok, err := maxTTLForTx(ctx, tx, resource); err != nil {
+		return 0, 0, err
+	} else if ok && maxTTL > 0 && ttlSec > maxTTL {
+		return 0, 0, fmt.Errorf("renew: %w", ErrTTLExceedsMax)
+	}
 	expiresAt = now + ttlSec
 	if _, err := tx.ExecContext(ctx, `UPDATE leases SET expires_at = ?, ttl_seconds = ? WHERE resource = ?`, expiresAt, ttlSec, resource); err != nil {
 		return 0, 0, fmt.Errorf("renew update: %w", err)

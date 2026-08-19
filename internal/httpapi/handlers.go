@@ -114,6 +114,12 @@ func decode(r *http.Request, dst any) error {
 	if err := dec.Decode(dst); err != nil {
 		return err
 	}
+	// A request body must contain exactly one JSON value. Reject trailing
+	// content (e.g. a second concatenated value) instead of silently treating
+	// only the first object as the request.
+	if dec.More() {
+		return errors.New("unexpected trailing JSON value in request body")
+	}
 	return nil
 }
 

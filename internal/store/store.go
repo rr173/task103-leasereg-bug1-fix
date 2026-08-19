@@ -411,7 +411,9 @@ func (s *Store) ListExpired(ctx context.Context, now int64) ([]LeaseRow, error) 
 
 // Stats summarises the database: active leases, expired-but-unswept leases,
 // distinct resources ever seen (from fencing counters) and distinct holders
-// of currently-stored leases.
+// of active (unexpired) leases. A lease whose TTL has elapsed but that has
+// not yet been swept is excluded from the holder count, matching its
+// exclusion from the active-lease count.
 type Stats struct {
 	ActiveLeases   int
 	ExpiredLeases  int
@@ -419,7 +421,9 @@ type Stats struct {
 	TotalHolders   int
 }
 
-// Stats computes summary statistics at the given instant.
+// Stats computes summary statistics at the given instant. The holder count
+// considers only leases that are still active at now, so an expired but
+// unswept lease does not keep its holder on the books.
 func (s *Store) Stats(ctx context.Context, now int64) (Stats, error) {
 	var st Stats
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM leases WHERE expires_at > ?`, now).Scan(&st.ActiveLeases); err != nil {
@@ -431,7 +435,7 @@ func (s *Store) Stats(ctx context.Context, now int64) (Stats, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fencing_counters`).Scan(&st.TotalResources); err != nil {
 		return st, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT holder) FROM leases`).Scan(&st.TotalHolders); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT holder) FROM leases WHERE expires_at > ?`, now).Scan(&st.TotalHolders); err != nil {
 		return st, err
 	}
 	return st, nil

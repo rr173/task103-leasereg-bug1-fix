@@ -16,6 +16,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"leasereg/internal/lease"
@@ -114,11 +115,20 @@ func decode(r *http.Request, dst any) error {
 	if err := dec.Decode(dst); err != nil {
 		return err
 	}
-	// A request body must contain exactly one JSON value. Reject trailing
-	// content (e.g. a second concatenated value) instead of silently treating
-	// only the first object as the request.
-	if dec.More() {
-		return errors.New("unexpected trailing JSON value in request body")
+	// A request body must contain exactly one JSON value. Reject any trailing
+	// non-whitespace content — for example a second JSON value concatenated
+	// after a complete object — instead of silently treating only the first
+	// object as the request. Anything the decoder read past the first value is
+	// still buffered; the remainder is unread on r.Body. Together those are all
+	// the trailing bytes.
+	rest, err := io.ReadAll(io.MultiReader(dec.Buffered(), r.Body))
+	if err != nil {
+		return err
+	}
+	for _, c := range rest {
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			return errors.New("unexpected trailing content in request body")
+		}
 	}
 	return nil
 }
